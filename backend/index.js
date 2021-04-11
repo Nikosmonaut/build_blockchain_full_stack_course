@@ -1,4 +1,5 @@
 const express = require('express');
+const path = require('path');
 const { json: bodyParserJSON } = require('body-parser');
 const Blockchain = require('./blockchain');
 const TransactionPool = require('./wallet/transaction-pool');
@@ -8,12 +9,11 @@ const PubSub = require('./app/pubsub');
 const TransactionMiner = require('./app/transaction-miner');
 
 const DEFAULT_PORT = 3000;
-
+const ROOT_NODE_ADDRESS = `http://localhost:${DEFAULT_PORT}`;
 let PEER_PORT;
 if (process.env.GENERATE_PEER_PORT === 'true') {
   PEER_PORT = DEFAULT_PORT + Math.ceil(Math.random() * 1000);
 }
-
 const PORT = PEER_PORT || DEFAULT_PORT;
 
 const app = express();
@@ -28,7 +28,57 @@ const transactionMiner = new TransactionMiner({
   pubsub,
 });
 
-const ROOT_NODE_ADDRESS = `http://localhost:${DEFAULT_PORT}`;
+const walletFoo = new Wallet();
+const walletBar = new Wallet();
+
+function generateWalletTransaction({ wallet, recipient, amount }) {
+  const transaction = wallet.createTransaction({
+    recipient,
+    amount,
+    chain: blockchain.chain,
+  });
+
+  transactionPool.setTransaction(transaction);
+}
+
+function walletAction() {
+  generateWalletTransaction({
+    wallet,
+    recipient: walletFoo.publicKey,
+    amount: 5,
+  });
+}
+
+function walletFooAction() {
+  generateWalletTransaction({
+    wallet: walletFoo,
+    recipient: walletBar.publicKey,
+    amount: 10,
+  });
+}
+
+function walletBarAction() {
+  generateWalletTransaction({
+    wallet: walletBar,
+    recipient: wallet.publicKey,
+    amount: 15,
+  });
+}
+
+for (let i = 0; i < 10; i++) {
+  if (i % 3 === 0) {
+    walletAction();
+    walletFooAction();
+  } else if (i % 3 === 1) {
+    walletAction();
+    walletBarAction();
+  } else {
+    walletFooAction();
+    walletBarAction();
+  }
+
+  transactionMiner.mineTransactions();
+}
 
 const syncWithRootState = () => {
   request(
@@ -62,6 +112,7 @@ const syncWithRootState = () => {
 };
 
 app.use(bodyParserJSON({ extended: true }));
+app.use(express.static(path.join(__dirname, 'client/dist')));
 
 app.get('/api/blocks', (req, res) => {
   res.json(blockchain.chain);
@@ -126,6 +177,10 @@ app.post('/api/transact', (req, res) => {
   pubsub.broadcastTransaction(transaction);
 
   res.json({ type: 'success', transaction });
+});
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, './client/dist/index.html'));
 });
 
 app.listen(PORT, () => {
